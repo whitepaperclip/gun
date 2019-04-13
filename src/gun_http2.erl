@@ -117,6 +117,8 @@ frame(State=#http2_state{http2_machine=HTTP2Machine0}, Frame) ->
 			maybe_ack(State#http2_state{http2_machine=HTTP2Machine}, Frame);
 		{ok, {data, StreamID, IsFin, Data}, HTTP2Machine} ->
 			data_frame(State#http2_state{http2_machine=HTTP2Machine}, StreamID, IsFin, Data);
+		{ok, {lingering_data, StreamID}, HTTP2Machine} ->
+			lingering_data_frame(State#http2_state{http2_machine=HTTP2Machine}, StreamID);
 		{ok, {headers, StreamID, IsFin, Headers, PseudoHeaders, BodyLen}, HTTP2Machine} ->
 			headers_frame(State#http2_state{http2_machine=HTTP2Machine},
 				StreamID, IsFin, Headers, PseudoHeaders, BodyLen);
@@ -148,26 +150,46 @@ maybe_ack(State=#http2_state{socket=Socket, transport=Transport}, Frame) ->
 	end,
 	State.
 
+lingering_data_frame(State=#http2_state{socket=Socket, transport=Transport,
+		http2_machine=HTTP2Machine0}, _StreamID) ->
+	{HTTP2Machine1, ConnSize} = cow_http2_machine:update_window2(HTTP2Machine0),
+	if
+		ConnSize > 0 ->
+			Transport:send(Socket, [
+				cow_http2:window_update(ConnSize)
+			]),
+			State#http2_state{http2_machine=HTTP2Machine1};
+		true ->
+			State#http2_state{http2_machine=HTTP2Machine1}
+	end.
+
 data_frame(State=#http2_state{socket=Socket, transport=Transport,
 		http2_machine=HTTP2Machine0}, StreamID, IsFin, Data) ->
 	Stream = #stream{handler_state=Handlers0} = get_stream_by_id(State, StreamID),
 	Handlers = gun_content_handler:handle(IsFin, Data, Handlers0),
-	Size = byte_size(Data),
-	HTTP2Machine = case Size of
-		%% We do not send a WINDOW_UPDATE if the DATA frame was of size 0.
-		0 ->
-			HTTP2Machine0;
-		_ ->
-			Transport:send(Socket, cow_http2:window_update(Size)),
-			HTTP2Machine1 = cow_http2_machine:update_window(Size, HTTP2Machine0),
-			%% We do not send a stream WINDOW_UPDATE if this was the last DATA frame.
+
+	{HTTP2Machine1, ConnSize} = cow_http2_machine:update_window2(HTTP2Machine0),
+	{HTTP2Machine, StreamSize} = cow_http2_machine:update_window2(StreamID, HTTP2Machine1),
+
+	case {ConnSize, StreamSize} of
+		{0, 0} ->
+			ok;
+		{ConnSize, 0} ->
+			Transport:send(Socket, [
+				cow_http2:window_update(ConnSize)
+			]);
+		{0, StreamSize} ->
 			case IsFin of
 				nofin ->
-					Transport:send(Socket, cow_http2:window_update(StreamID, Size)),
-					cow_http2_machine:update_window(StreamID, Size, HTTP2Machine1);
+					Transport:send(Socket, cow_http2:window_update(StreamID, StreamSize));
 				fin ->
-					HTTP2Machine1
-			end
+					ok
+			end;
+		_ ->
+			Transport:send(Socket, [
+				cow_http2:window_update(ConnSize),
+				cow_http2:window_update(StreamID, StreamSize)
+			])
 	end,
 	maybe_delete_stream(store_stream(State#http2_state{http2_machine=HTTP2Machine},
 		Stream#stream{handler_state=Handlers}), StreamID, remote, IsFin).
