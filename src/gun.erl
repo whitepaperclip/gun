@@ -255,9 +255,13 @@ check_options([Opt = {protocols, L}|Opts]) when is_list(L) ->
 		_ ->
 			{error, {options, Opt}}
 	end;
+check_options([{retry, infinity}|Opts]) ->
+	check_options(Opts);
 check_options([{retry, R}|Opts]) when is_integer(R), R >= 0 ->
 	check_options(Opts);
 check_options([{retry_timeout, T}|Opts]) when is_integer(T), T >= 0 ->
+	check_options(Opts);
+check_options([{retry_timeout, T}|Opts]) when is_function(T) ->
 	check_options(Opts);
 check_options([{trace, B}|Opts]) when B =:= true; B =:= false ->
 	check_options(Opts);
@@ -694,12 +698,12 @@ init({Owner, Host, Port, Opts}) ->
 		host=Host, port=Port, origin_host=Host, origin_port=Port,
 		opts=Opts, transport=Transport, messages=Transport:messages()},
 	{ok, not_connected, State,
-		{next_event, internal, {retries, Retry}}}.
+		{next_event, internal, {retries, 1, Retry}}}.
 
 default_transport(443) -> tls;
 default_transport(_) -> tcp.
 
-not_connected(_, {retries, Retries},
+not_connected(_, {retries, CurrRetry, RetriesLeft},
 		State=#state{host=Host, port=Port, opts=Opts, transport=Transport}) ->
 	TransOpts0 = maps:get(transport_opts, Opts, []),
 	TransOpts1 = case Transport of
@@ -723,12 +727,26 @@ not_connected(_, {retries, Retries},
 			end,
 			{next_state, connected, State,
 				{next_event, internal, {connected, Socket, Protocol}}};
-		{error, Reason} when Retries =:= 0 ->
+		{error, Reason} when RetriesLeft =:= 0 ->
+			error_logger:error_msg("Got error ~p. Will stop.", [Reason]),
 			{stop, {shutdown, Reason}};
-		{error, _Reason} ->
-			Timeout = maps:get(retry_timeout, Opts, 5000),
+		{error, Reason} ->
+			Timeout0 = maps:get(retry_timeout, Opts, 5000),
+			Timeout = case Timeout0 of
+				RetryFunc when is_function(RetryFunc) ->
+					RetryFunc(CurrRetry);
+				_ ->
+					Timeout0
+			end,
+			RetriesLeft1 = case RetriesLeft of
+				infinity ->
+					RetriesLeft;
+				_ ->
+					RetriesLeft - 1
+			end,
+			error_logger:error_msg("Got error when retry: ~p, will retry after ~pms. Have retried ~p times, ~p times left.", [Reason, Timeout, CurrRetry, RetriesLeft1]),
 			{keep_state, State,
-				{state_timeout, Timeout, {retries, Retries - 1}}}
+				{state_timeout, Timeout, {retries, CurrRetry + 1, RetriesLeft1}}}
 	end;
 not_connected({call, From}, {stream_info, _}, _) ->
 	{keep_state_and_data, {reply, From, {error, not_connected}}};
@@ -946,7 +964,7 @@ disconnect(State=#state{owner=Owner, opts=Opts,
 			{next_state, not_connected,
 				keepalive_cancel(State#state{socket=undefined,
 					protocol=undefined, protocol_state=undefined}),
-				{next_event, internal, {retries, Retry - 1}}}
+				{next_event, internal, {retries, 1, Retry}}}
 	end.
 
 disconnect_flush(State=#state{socket=Socket, messages={OK, Closed, Error}}) ->
