@@ -750,6 +750,16 @@ not_connected(_, {retries, CurrRetry, RetriesLeft},
 	end;
 not_connected({call, From}, {stream_info, _}, _) ->
 	{keep_state_and_data, {reply, From, {error, not_connected}}};
+not_connected(cast, Event, State) when is_tuple(Event) ->
+	EventType = element(1, Event),
+	IsRequest = lists:member(EventType, [request, headers, data]),
+	if
+		IsRequest ->
+			{keep_state, State,
+				{postpone, true}};
+		true ->
+			handle_common(cast, Event, ?FUNCTION_NAME, State)
+	end;
 not_connected(Type, Event, State) ->
 	handle_common(Type, Event, ?FUNCTION_NAME, State).
 
