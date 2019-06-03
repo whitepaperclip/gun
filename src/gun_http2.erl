@@ -137,7 +137,7 @@ frame(State=#http2_state{http2_machine=HTTP2Machine0}, Frame) ->
 						{stop, Frame, 'Server is going away.'});
 				% After receiving GOAWAY, clients should continue handling current streams.
 				_ ->
-					ok
+					State#http2_state{http2_machine=HTTP2Machine}
 			end;
 		{send, SendData, HTTP2Machine} ->
 			send_data(maybe_ack(State#http2_state{http2_machine=HTTP2Machine}, Frame), SendData);
