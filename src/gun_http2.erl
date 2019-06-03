@@ -131,8 +131,14 @@ frame(State=#http2_state{http2_machine=HTTP2Machine0}, Frame) ->
 			push_promise_frame(State#http2_state{http2_machine=HTTP2Machine},
 				StreamID, PromisedStreamID, Headers, PseudoHeaders);
 		{ok, Frame={goaway, _StreamID, _Reason, _Data}, HTTP2Machine} ->
-			terminate(State#http2_state{http2_machine=HTTP2Machine},
-				{stop, Frame, 'Server is going away.'});
+			case State of
+				#http2_state{streams=[]} ->
+					terminate(State#http2_state{http2_machine=HTTP2Machine},
+						{stop, Frame, 'Server is going away.'});
+				% After receiving GOAWAY, clients should continue handling current streams.
+				_ ->
+					ok
+			end;
 		{send, SendData, HTTP2Machine} ->
 			send_data(maybe_ack(State#http2_state{http2_machine=HTTP2Machine}, Frame), SendData);
 		{error, {stream_error, StreamID, Reason, Human}, HTTP2Machine} ->
