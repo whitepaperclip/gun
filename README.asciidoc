@@ -1,3 +1,9 @@
+= NOTICE about the grpc fork
+
+This is same with upstream, but 2.0.0 is not released yet.
+
+See https://github.com/elixir-grpc/grpc#installation for details.
+
 = Gun
 
 Gun is an Erlang HTTP client with support for HTTP/1.1, HTTP/2 and Websocket.
