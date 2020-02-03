@@ -728,7 +728,7 @@ not_connected(_, {retries, CurrRetry, RetriesLeft},
 			{next_state, connected, State,
 				{next_event, internal, {connected, Socket, Protocol}}};
 		{error, Reason} when RetriesLeft =:= 0 ->
-			error_logger:error_msg("Got error ~p. Will stop.", [Reason]),
+			error_logger:error_msg("Got error ~p when connecting to ~p:~p. Will stop.", [Reason, Host, Port]),
 			{stop, {shutdown, Reason}};
 		{error, Reason} ->
 			Timeout0 = maps:get(retry_timeout, Opts, 5000),
@@ -744,7 +744,7 @@ not_connected(_, {retries, CurrRetry, RetriesLeft},
 				_ ->
 					RetriesLeft - 1
 			end,
-			error_logger:error_msg("Got error when retry: ~p, will retry after ~pms. Have retried ~p times, ~p times left.", [Reason, Timeout, CurrRetry, RetriesLeft1]),
+			error_logger:error_msg("Got error ~p when retry connecting to ~p:~p, will retry after ~pms. Have retried ~p times, ~p times left.", [Reason, Host, Port, Timeout, CurrRetry, RetriesLeft1]),
 			{keep_state, State,
 				{state_timeout, Timeout, {retries, CurrRetry + 1, RetriesLeft1}}}
 	end;
