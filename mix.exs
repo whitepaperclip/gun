@@ -19,7 +19,7 @@ defmodule Gun.Mixfile do
 
   defp deps do
     [
-      {:cowlib, "~> 2.8.0"},
+      {:cowlib, "~> 2.8"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
